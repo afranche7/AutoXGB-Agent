@@ -1,0 +1,128 @@
+"""Standalone inference for the AutoXGB model trained in run `${RUN_ID}`.
+
+Target: `${TARGET}`  ·  Task: ${TASK_TYPE}  ·  Generated: ${GENERATED_AT}
+
+This directory is self-contained. From here:
+
+    uv sync
+    uv run predict.py new_data.csv -o predictions.csv
+
+Or import it:
+
+    from predict import predict
+    predictions = predict(dataframe)
+
+The input needs the same raw feature columns the model was trained on; extra
+columns are ignored and unseen category values are handled gracefully.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import xgboost as xgb
+
+from preprocess import transform
+
+HERE = Path(__file__).resolve().parent
+
+with (HERE / "inference_metadata.json").open(encoding="utf-8") as _handle:
+    METADATA = json.load(_handle)
+
+TASK_TYPE: str = METADATA["task_type"]
+TARGET: str = METADATA["target"]
+CLASSES: list[str] = METADATA.get("classes") or []
+REQUIRED_COLUMNS: list[str] = METADATA["required_input_columns"]
+
+_BOOSTER: xgb.Booster | None = None
+
+
+def load_model() -> xgb.Booster:
+    """Load the model once and cache it.
+
+    Deliberately the plain `Booster` API rather than `XGBClassifier`: the sklearn
+    wrappers import scikit-learn, which would drag a large dependency into what is
+    otherwise a three-package inference environment.
+    """
+    global _BOOSTER
+    if _BOOSTER is None:
+        booster = xgb.Booster()
+        booster.load_model(str(HERE / "model.json"))
+        _BOOSTER = booster
+    return _BOOSTER
+
+
+def load_preprocessor_state() -> dict:
+    with (HERE / "preprocessor.json").open(encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def predict(df: pd.DataFrame) -> pd.DataFrame:
+    """Predict for a raw feature frame.
+
+    Returns a frame aligned to `df.index`:
+      * regression -> a single `prediction` column
+      * classification -> `prediction` (the original class label) plus one
+        `proba_<class>` column per class
+    """
+    missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
+    if missing:
+        raise KeyError(f"input is missing required columns: {', '.join(missing)}")
+
+    matrix = transform(df, load_preprocessor_state())
+    raw = load_model().inplace_predict(matrix.to_numpy(dtype=np.float32))
+
+    if TASK_TYPE == "regression":
+        return pd.DataFrame({"prediction": np.asarray(raw).ravel()}, index=df.index)
+
+    proba = np.asarray(raw)
+    if proba.ndim == 1:  # binary:logistic returns P(positive class) only
+        proba = np.column_stack([1.0 - proba, proba])
+    codes = proba.argmax(axis=1)
+    labels = [CLASSES[int(c)] if int(c) < len(CLASSES) else str(int(c)) for c in codes]
+    out = pd.DataFrame({"prediction": labels}, index=df.index)
+    for i, name in enumerate(CLASSES):
+        out[f"proba_{name}"] = proba[:, i]
+    return out
+
+
+def _read_any(path: Path) -> pd.DataFrame:
+    suffix = path.suffix.lower()
+    if suffix in {".parquet", ".pq"}:
+        return pd.read_parquet(path)
+    if suffix == ".tsv":
+        return pd.read_csv(path, sep="\t")
+    return pd.read_csv(path)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("input", type=Path, help="CSV, TSV or Parquet file to score")
+    parser.add_argument(
+        "-o", "--output", type=Path, default=Path("predictions.csv"), help="Where to write predictions"
+    )
+    parser.add_argument(
+        "--with-input",
+        action="store_true",
+        help="Include the input columns alongside the predictions",
+    )
+    args = parser.parse_args()
+
+    frame = _read_any(args.input)
+    result = predict(frame)
+    if args.with_input:
+        result = pd.concat([frame, result], axis=1)
+
+    if args.output.suffix.lower() in {".parquet", ".pq"}:
+        result.to_parquet(args.output, index=False)
+    else:
+        result.to_csv(args.output, index=False)
+    print(f"Wrote {len(result):,} predictions for '{TARGET}' to {args.output}")
+
+
+if __name__ == "__main__":
+    main()
