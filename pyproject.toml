@@ -18,12 +18,18 @@ dependencies = [
     "pydantic>=2.8",
 ]
 
+[project.optional-dependencies]
+# The web UI is optional: the CLI shows the same progress without it.
+ui = ["streamlit>=1.37"]
+
 [project.scripts]
 autoxgb = "autoxgb_agent.cli:app"
 
 [dependency-groups]
 dev = [
     "pytest>=8.3",
+    # Development installs get the UI too, so the suite covers it.
+    "streamlit>=1.37",
 ]
 
 [build-system]
