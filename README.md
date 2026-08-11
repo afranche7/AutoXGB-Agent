@@ -179,7 +179,7 @@ uv sync
 uv run pytest
 ```
 
-102 tests, no network and no model calls, so `uv run pytest` is fast and free. They
+103 tests, no network and no model calls, so `uv run pytest` is fast and free. They
 cover the whole tool chain on synthetic classification and regression data
 (profiling through to executing the exported `predict.py` in a subprocess), and
 drive the approval gate and orchestrator→subagent delegation through real

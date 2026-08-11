@@ -152,10 +152,9 @@ def page(monkeypatch):
 
     def _render(output_dir: Path):
         monkeypatch.setattr(sys, "argv", ["app.py", "--output-dir", str(output_dir)])
-        app = testing.AppTest.from_file(str(APP), default_timeout=60)
-        # Otherwise the page sleeps and reruns itself while a run is in flight.
-        app.session_state["auto_refresh"] = False
-        return app.run()
+        # Left on its default auto-refresh, so an unfinished run renders through
+        # the polling fragment — the page must not block the script to refresh.
+        return testing.AppTest.from_file(str(APP), default_timeout=30).run()
 
     return _render
 
@@ -194,6 +193,33 @@ def test_the_page_shows_where_a_run_got_to(page, tmp_path):
         "Artifacts",
         "Console",
     ]
+
+
+def test_tool_calls_render_without_a_dataframe(tmp_path):
+    """Handing `st.dataframe` a list of dicts segfaults the server; markdown cannot."""
+    pytest.importorskip("streamlit")
+    from autoxgb_agent.progress import ToolCall
+    from autoxgb_agent.ui.app import tool_call_table
+
+    table = tool_call_table(
+        [
+            ToolCall(tool="train_xgboost", started_at=0.0, ended_at=2.5, ok=True, summary="Fitted."),
+            ToolCall(tool="tune_xgboost", started_at=0.0, progress="trial 3/12 — best 0.81"),
+            ToolCall(
+                tool="evaluate_model",
+                started_at=0.0,
+                ended_at=1.0,
+                ok=False,
+                summary="ERROR: no model | yet",
+            ),
+        ]
+    )
+    lines = table.splitlines()
+    assert lines[0].startswith("| tool |")
+    assert "`train_xgboost` | ✅ ok | 2.50s | Fitted." in lines[2]
+    assert "◐ running | — | trial 3/12" in lines[3]
+    assert "❌ failed" in lines[4]
+    assert "no model \\| yet" in lines[4], "an unescaped pipe would break the table"
 
 
 def test_the_page_renders_with_no_runs_at_all(page, tmp_path):

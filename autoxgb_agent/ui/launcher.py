@@ -18,11 +18,10 @@ from autoxgb_agent.progress import (
     CONSOLE_LOG_FILE,
     EVENTS_FILE,
     PROGRESS_DIRNAME,
+    UPLOAD_DIRNAME,
     RunState,
     read_progress,
 )
-
-UPLOAD_DIRNAME = "_uploads"
 
 
 @dataclass(frozen=True)

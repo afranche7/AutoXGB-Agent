@@ -81,12 +81,23 @@ def main() -> None:
         st.info("No runs yet. Start one from the sidebar.")
         return
 
-    state = launcher.load_state(run_dir)
-    render_run(run_dir, state)
+    # Only the run view refreshes, and only while there is something to watch.
+    # Re-running the whole page on a timer would leave every widget — including
+    # the approval buttons — disabled for most of each cycle.
+    if st.session_state.get("auto_refresh", True) and not launcher.load_state(run_dir).is_finished:
+        live_run(run_dir)
+    else:
+        static_run(run_dir)
 
-    if st.session_state.get("auto_refresh", True) and not state.is_finished:
-        time.sleep(REFRESH_SECONDS)
-        st.rerun()
+
+@st.fragment(run_every=REFRESH_SECONDS)
+def live_run(run_dir: Path) -> None:
+    render_run(run_dir, launcher.load_state(run_dir))
+
+
+@st.fragment
+def static_run(run_dir: Path) -> None:
+    render_run(run_dir, launcher.load_state(run_dir))
 
 
 # --------------------------------------------------------------------------- #
@@ -293,24 +304,30 @@ def render_stages(state: RunState) -> None:
             if stage.error:
                 st.error(stage.error)
             if stage.tool_calls:
-                st.dataframe(
-                    [
-                        {
-                            "tool": call.tool,
-                            "outcome": "running"
-                            if call.ended_at is None
-                            else ("ok" if call.ok else "failed"),
-                            "seconds": None
-                            if call.duration is None
-                            else round(call.duration, 2),
-                            "result": call.summary or call.progress,
-                        }
-                        for call in stage.tool_calls
-                    ],
-                    hide_index=True,
-                )
+                st.markdown(tool_call_table(stage.tool_calls))
             elif stage.status == PENDING:
                 st.caption("Not started.")
+
+
+def tool_call_table(calls: list[Any]) -> str:
+    """The stage's tool calls, as markdown.
+
+    Deliberately not `st.dataframe`: handing it a list of dicts makes pandas
+    infer an Arrow-backed frame, which segfaults the server process on this
+    pandas/pyarrow pairing. A four-column table needs none of that.
+    """
+    rows = ["| tool | outcome | time | result |", "| --- | --- | --- | --- |"]
+    for call in calls:
+        if call.ended_at is None:
+            outcome, mark = "running", "◐"
+        elif call.ok:
+            outcome, mark = "ok", "✅"
+        else:
+            outcome, mark = "failed", "❌"
+        seconds = "—" if call.duration is None else f"{call.duration:.2f}s"
+        result = (call.summary or call.progress or "").replace("|", "\\|")
+        rows.append(f"| `{call.tool}` | {mark} {outcome} | {seconds} | {result} |")
+    return "\n".join(rows)
 
 
 def render_todos(state: RunState) -> None:

@@ -44,6 +44,10 @@ APPROVAL_REQUEST_FILE = f"{PROGRESS_DIRNAME}/approval_request.json"
 APPROVAL_RESPONSE_FILE = f"{PROGRESS_DIRNAME}/approval_response.json"
 CONSOLE_LOG_FILE = f"{PROGRESS_DIRNAME}/console.log"
 
+# Where the UI parks uploaded datasets. It lives alongside the run directories,
+# so anything listing runs has to know it is not one.
+UPLOAD_DIRNAME = "_uploads"
+
 # How many activity lines a live view keeps in memory.
 ACTIVITY_LIMIT = 400
 

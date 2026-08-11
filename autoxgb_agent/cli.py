@@ -36,6 +36,7 @@ from autoxgb_agent.progress import (
     DONE,
     EVENTS_FILE,
     FAILED,
+    UPLOAD_DIRNAME,
     ApprovalTimeout,
     ProgressReader,
     ProgressRecorder,
@@ -386,7 +387,9 @@ def list_runs(
         raise typer.Exit()
 
     rows = []
-    for directory in sorted(p for p in output_dir.iterdir() if p.is_dir()):
+    for directory in sorted(
+        p for p in output_dir.iterdir() if p.is_dir() and p.name != UPLOAD_DIRNAME
+    ):
         plan_path = directory / "task_plan.json"
         selected_path = directory / "selected_model.json"
         target = task_type = score = "-"
