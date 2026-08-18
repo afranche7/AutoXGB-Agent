@@ -20,6 +20,7 @@ from autoxgb_agent.modeling import (
     predict_frames,
     score_for_tuning,
 )
+from autoxgb_agent.progress import tool_progress
 from autoxgb_agent.schemas import (
     FloatRange,
     IntRange,
@@ -110,11 +111,26 @@ def tune_xgboost(
         y_pred, y_proba = predict_frames(model, x_val, task_type)
         return score_for_tuning(task_type, compute_metrics(task_type, y_val, y_pred, y_proba))
 
+    def report(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
+        """Tuning is the longest stage; say where it is after every trial."""
+        done = trial.number + 1
+        try:
+            best = f" — best {primary_metric(task_type)} {study.best_value:.4f}"
+        except ValueError:  # no trial has completed yet
+            best = ""
+        tool_progress(
+            "tune_xgboost", f"trial {done}/{n_trials}{best}", fraction=done / n_trials
+        )
+
     study = optuna.create_study(
         direction="maximize", sampler=TPESampler(seed=run.random_state)
     )
     study.optimize(
-        objective, n_trials=n_trials, timeout=timeout_seconds, catch=(Exception,)
+        objective,
+        n_trials=n_trials,
+        timeout=timeout_seconds,
+        catch=(Exception,),
+        callbacks=[report],
     )
 
     completed = [t for t in study.trials if t.value is not None]

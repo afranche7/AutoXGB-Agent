@@ -86,17 +86,23 @@ withheld.
 
 ```
 autoxgb_agent/
-  cli.py            # `autoxgb run data.csv --goal "predict churn"`, `autoxgb runs`
+  cli.py            # `autoxgb run|runs|watch|ui`
   orchestrator.py   # create_deep_agent wiring, permissions, approval gate
   subagents.py      # the 7 SubAgent specs
   context.py        # RunContext (dataset path, run dir, budget) via ContextVar
+  progress.py       # the run event log, its reducer, the approval handshake
+  console.py        # the live terminal dashboard; stream -> progress events
   schemas.py        # TaskPlan, FeatureSpec, TrainConfig, SearchSpace
   modeling.py       # shared model build / fit / metric helpers
   preprocess.py     # fit + transform; copied verbatim into every bundle
   prompts/*.md      # one per agent
   tools/*.py        # the tool suite above
   templates/        # predict.py, pyproject.toml, README for the bundle
-outputs/<run_id>/   # artifacts, gitignored
+  ui/               # the Streamlit front-end (optional `ui` extra)
+    app.py          # the page
+    launcher.py     # spawns `autoxgb run`, finds runs, reads artifacts
+outputs/<run_id>/           # artifacts, gitignored
+outputs/<run_id>/progress/  # events.jsonl, state.json, approval handshake
 tests/
 ```
 
@@ -109,6 +115,17 @@ tests/
   LangChain's pre-call argument validation.
 - **Artifacts are the handoff.** Every tool writes its full output to the run
   directory and returns a short summary, so large tables never enter context.
+- **Progress is a file, not a callback.** Everything that shows a run — the CLI
+  dashboard, `autoxgb watch`, the UI — replays `progress/events.jsonl`, so no
+  surface can disagree with another and any process can watch any run. Two
+  signals feed it: delegation, read off the orchestrator's message stream
+  (`console.StreamTracker`), and tool execution, emitted by `@guard` itself. The
+  second is what makes work *inside* a subagent visible, since a subagent's own
+  messages never reach the parent stream.
+- **A stage is a subagent, and a tool belongs to exactly one.** `progress.STAGES`
+  mirrors `build_subagents()`; a test pins them together, so renaming a subagent
+  or moving a tool between them fails loudly instead of silently dropping a stage
+  off every progress view.
 - **Never name a tool parameter `config`** — LangChain's `StructuredTool._run`
   takes `config` as a keyword-only argument and would swallow it.
 - **`objective`/`eval_metric`/`num_class` are derived** from the approved task
@@ -116,9 +133,10 @@ tests/
 
 ## Still to build
 
-- Streamlit front-end for non-technical users to upload data and watch the run.
 - The transfer check described below.
 - Featurising text columns instead of dropping them.
+- Per-trial progress from the tuner: Optuna currently reports only when the whole
+  search finishes, so a long tune shows as one long-running tool call.
 
 ## Design decisions worth thinking about early
 

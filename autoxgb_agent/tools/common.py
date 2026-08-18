@@ -12,6 +12,7 @@ import pandas as pd
 from pydantic import BaseModel, ValidationError
 
 from autoxgb_agent.context import RunContext, get_run_context
+from autoxgb_agent.progress import tool_finished, tool_started
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -47,30 +48,44 @@ def harden(tools: list[Any]) -> list[Any]:
 
 
 def guard(fn: Callable[..., str]) -> Callable[..., str]:
-    """Turn exceptions raised inside a tool into tool text.
+    """Turn exceptions raised inside a tool into tool text, and report progress.
 
     A tool that raises kills the run; a tool that *reports* lets the agent try
     something else. Argument validation is handled separately by `harden`; this
     covers everything that goes wrong once the body is running.
+
+    Every tool is wrapped, and every tool belongs to exactly one specialist, so
+    this is also where a run's progress is observed: the start, the outcome, the
+    duration and the artifacts of each call. That works even inside a subagent,
+    whose own messages never reach the orchestrator's stream.
     """
 
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> str:
+        handle = tool_started(fn.__name__)
         try:
-            return fn(*args, **kwargs)
+            result = fn(*args, **kwargs)
         except ValidationError as exc:
-            return format_validation_error(exc, fn.__name__)
+            return _failed(handle, format_validation_error(exc, fn.__name__))
         except ToolFailure as exc:
-            return f"ERROR in {fn.__name__}: {exc}"
+            return _failed(handle, f"ERROR in {fn.__name__}: {exc}")
         except FileNotFoundError as exc:
-            return (
+            return _failed(
+                handle,
                 f"ERROR in {fn.__name__}: required artifact missing ({exc}). "
-                "An earlier pipeline stage has not run yet."
+                "An earlier pipeline stage has not run yet.",
             )
         except Exception as exc:  # noqa: BLE001 - deliberately broad; see docstring
-            return f"ERROR in {fn.__name__}: {type(exc).__name__}: {exc}"
+            return _failed(handle, f"ERROR in {fn.__name__}: {type(exc).__name__}: {exc}")
+        tool_finished(handle, ok=True, summary=result)
+        return result
 
     return wrapper
+
+
+def _failed(handle: Any, message: str) -> str:
+    tool_finished(handle, ok=False, summary=message)
+    return message
 
 
 def validate(model: type[T], value: Any) -> T:

@@ -11,6 +11,51 @@ export ANTHROPIC_API_KEY=...
 uv run autoxgb run data.csv --goal "predict customer churn"
 ```
 
+## Watching it work
+
+A run is seven specialists and a few minutes of tuning, so it tells you where it
+is the whole way through. The terminal keeps a live dashboard pinned below the
+narration:
+
+```
+╭──────────────────────────────── pipeline ─────────────────────────────────╮
+│    stage                  status      time   tools  detail                │
+│ ●  Profile data           done       19.0s       1  churned looks like …  │
+│ ⏸  Target & task type     blocked    1m38s       1  waiting for your app… │
+│ ○  Engineer features      pending        -       -                        │
+│ ○  Train baseline         pending        -       -                        │
+│ ╭─────────────────────────────── plan ────────────────────────────────╮   │
+│ │ ✓ profile the data                                                  │   │
+│ │ ▸ pick the target                                                   │   │
+│ ╰─────────────────────────────────────────────────────────────────────╯   │
+╰──────── 1/7 stages • 2m00s • 2 tool calls • 1 error(s) • running ─────────╯
+```
+
+Every run also writes an append-only event log to
+`outputs/<run_id>/progress/events.jsonl` — each delegation, tool call, artifact
+and error, with timings. Everything else is a view over that file:
+
+```bash
+autoxgb watch                 # follow the most recent run, from any terminal
+autoxgb watch <run_id>        # follow (or replay) a specific one
+autoxgb ui                    # the web UI: start runs, watch them, approve plans
+```
+
+Because the log is a file, `watch` works on a run someone else started, and on a
+run that finished last week. `--plain` swaps the dashboard for one progress line
+per change, which is what you want in CI.
+
+### The web UI
+
+`autoxgb ui` (needs `uv sync --extra ui`) serves a Streamlit front-end for people
+who would rather not use a terminal: upload a dataset, type a goal, and watch each
+stage light up — with the tool calls, their durations, the todo list, the activity
+log, and every artifact browsable and downloadable as it appears. The task-plan
+approval appears there too, so a non-technical user can run the whole thing.
+
+The UI never runs the agent in-process: it spawns `autoxgb run` and reads the same
+progress log. Closing the browser does not stop a run.
+
 ## What you get
 
 Everything lands in `outputs/<run_id>/`:
@@ -24,6 +69,7 @@ Everything lands in `outputs/<run_id>/`:
 | `metrics.json` | The same numbers, machine-readable. |
 | `feature_importance.png`, `shap_summary.png` | The plots. |
 | `bundle/` | A standalone inference package — see below. |
+| `progress/events.jsonl` | Every stage, tool call, artifact and error, with timings. |
 
 The bundle runs on its own, in its own environment, with no dependency on this
 project — just pandas, numpy, pyarrow and xgboost:
@@ -75,7 +121,17 @@ reject it with feedback the agent acts on.
 Approve this plan? [y]es / [n]o (give feedback) [y]:
 ```
 
-Use `--yes` for unattended runs.
+Use `--yes` for unattended runs. Where the question gets asked is up to you:
+
+| `--approve-via` | who answers |
+| --- | --- |
+| `prompt` (default) | this terminal |
+| `file` | the UI, or `autoxgb watch <run_id> --approve` from anywhere |
+| `auto` | nobody — same as `--yes` |
+
+In `file` mode the run publishes the pending plan into its own directory and
+blocks until something answers, which is how the UI can approve a run it started
+in another process.
 
 ### Leakage screening
 
@@ -88,10 +144,12 @@ prediction time, and gets flagged for dropping.
 
 ```
 autoxgb run DATASET --goal TEXT [options]
-autoxgb runs                       # list previous runs and what they produced
+autoxgb runs                       # previous runs: how far each got, what it produced
+autoxgb watch [RUN_ID]             # follow or replay a run's progress
+autoxgb ui                         # the web UI
 ```
 
-| option | default | |
+| `run` option | default | |
 | --- | --- | --- |
 | `--goal`, `-g` | required | What to predict, in plain English. |
 | `--run-id` | timestamp | Name the run. |
@@ -101,7 +159,16 @@ autoxgb runs                       # list previous runs and what they produced
 | `--tuning-timeout` | 600 | Cap on tuning wall-clock seconds. |
 | `--seed` | 42 | Random state for splits and training. |
 | `--yes`, `-y` | off | Skip the approval prompt. |
+| `--approve-via` | `prompt` | Who answers the approval gate: `prompt`, `file` or `auto`. |
 | `--quiet`, `-q` | off | Narration only; hide tool arguments and results. |
+| `--plain` | off | No live dashboard; one progress line per change. |
+
+| `watch` option | default | |
+| --- | --- | --- |
+| `--output-dir`, `-o` | `outputs` | Where run directories live. |
+| `--approve` | off | Answer this run's approval gate from here. |
+| `--follow/--no-follow` | follow | Keep watching, or render once and exit. |
+| `--refresh` | 0.5 | Seconds between polls of the progress log. |
 
 Datasets may be CSV, TSV or Parquet.
 
@@ -112,11 +179,16 @@ uv sync
 uv run pytest
 ```
 
-44 tests, no network and no model calls, so `uv run pytest` is fast and free. They
+103 tests, no network and no model calls, so `uv run pytest` is fast and free. They
 cover the whole tool chain on synthetic classification and regression data
 (profiling through to executing the exported `predict.py` in a subprocess), and
 drive the approval gate and orchestrator→subagent delegation through real
 LangGraph graphs backed by a scripted model.
+
+Progress tracking is covered end to end: the event log and its reducer, the tools
+reporting themselves, `autoxgb run`/`watch`/`runs` driven through the real
+commands, and the Streamlit page rendered headlessly with Streamlit's own test
+harness — including approving and rejecting a plan from it.
 
 Binary, multiclass and regression bundles have each been verified by hand in a
 fresh `uv sync`'d environment, which is how the missing `scikit-learn` dependency
