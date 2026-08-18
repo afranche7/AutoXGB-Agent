@@ -74,7 +74,15 @@ def launch(spec: LaunchSpec) -> subprocess.Popen[bytes]:
     (run_dir / PROGRESS_DIRNAME).mkdir(parents=True, exist_ok=True)
     log_path = run_dir / CONSOLE_LOG_FILE
     log = log_path.open("wb")
-    environment = {**os.environ, "PYTHONUNBUFFERED": "1", "NO_COLOR": "1"}
+    environment = {
+        **os.environ,
+        "PYTHONUNBUFFERED": "1",
+        "NO_COLOR": "1",
+        # stdout isn't a console here, so Python would otherwise pick the
+        # Windows locale codepage (cp1252), which can't encode the → in
+        # console.py's narration lines.
+        "PYTHONIOENCODING": "utf-8",
+    }
     return subprocess.Popen(  # noqa: S603 - argv is built here, never a shell string
         spec.command(),
         stdout=log,

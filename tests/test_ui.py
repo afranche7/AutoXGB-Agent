@@ -299,4 +299,5 @@ def test_the_launched_run_inherits_the_environment(tmp_path, monkeypatch):
 
     assert recorded["env"]["ANTHROPIC_API_KEY"] == "sk-ant-inherited"
     assert recorded["env"]["PYTHONUNBUFFERED"] == "1"
+    assert recorded["env"]["PYTHONIOENCODING"] == "utf-8"
     assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-inherited"

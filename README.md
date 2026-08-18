@@ -194,12 +194,4 @@ Binary, multiclass and regression bundles have each been verified by hand in a
 fresh `uv sync`'d environment, which is how the missing `scikit-learn` dependency
 was found; the suite now guards that statically instead.
 
-## Known gaps
-
-- **The full agent loop has not been run against a live model.** Every tool, the
-  graph wiring, delegation and the approval round-trip are covered by tests, but
-  nobody has yet watched Claude drive all seven stages end to end. Expect the
-  prompts to need tuning on first contact.
-- No transfer check yet: a model trained here is scored only on a held-out split
-  of the same dataset. See the note in each bundle's README.
-- Text columns are dropped rather than featurised.
+## UI
