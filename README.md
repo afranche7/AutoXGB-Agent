@@ -195,3 +195,5 @@ fresh `uv sync`'d environment, which is how the missing `scikit-learn` dependenc
 was found; the suite now guards that statically instead.
 
 ## UI
+<img width="2390" height="1846" alt="Screenshot 2026-08-17 220505" src="https://github.com/user-attachments/assets/44bcbfe1-c586-4bd9-a381-3ec65c23342d" />
+
